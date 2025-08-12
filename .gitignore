@@ -1,0 +1,6 @@
+patches/cilium.yaml
+secrets.yaml
+kubeconfig
+talosconfig
+controlplane.yaml
+worker.yaml

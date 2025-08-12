@@ -1,0 +1,180 @@
+version: 3
+
+env:
+  TALOSCONFIG: './talosconfig'
+  KUBECONFIG: './kubeconfig'
+
+vars:
+  CONTROLPLANES:
+    map:
+      '1': '192.168.122.27'
+  WORKERS:
+    map:
+      '1': '192.168.122.231'
+      '2': '192.168.122.243'
+      '3': '192.168.122.130'
+  FACTORYIMAGE: factory.talos.dev/metal-installer/376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba:v1.11.5
+  CILIUMVERSION: 1.18.4
+  NATIVEROUTINGCIDR: 10.244.0.0/16
+
+tasks:
+  bootstrap:
+    desc: Bootstraps the cluster
+    cmds:
+      - task: apply
+        vars:
+          EXTRAARG: "--insecure"
+      - talosctl config endpoint {{ index .CONTROLPLANES "1" }}
+      - talosctl config node {{ index .CONTROLPLANES "1" }}
+      - sleep 5
+      - talosctl -n {{ index .CONTROLPLANES "1" }} bootstrap
+      - sleep 5
+      - talosctl -n {{ index .CONTROLPLANES "1" }} kubeconfig .
+
+  apply:
+    desc: (re)-applies machineconfigs to all nodes
+    vars:
+      EXTRAARG: "{{ .EXTRAARG }}"
+    cmds:
+      - for: { var: CONTROLPLANES }
+        task: talosctl
+        vars:
+          NODE: "{{ .ITEM }}"
+          ARGS: >
+            apply-config {{.EXTRAARG}}
+            --file controlplane.yaml
+            --config-patch '[{"op": "add", "path": "/machine/network/hostname", "value": "talos-cp-{{ .KEY }}"}]'
+      - for: { var: WORKERS }
+        task: talosctl
+        vars:
+          NODE: "{{ .ITEM }}"
+          ARGS: >
+            apply-config {{.EXTRAARG}}
+            --file worker.yaml
+            --config-patch '[{"op": "add", "path": "/machine/network/hostname", "value": "talos-w-{{ .KEY }}"}]'
+
+  reset:
+    desc: Resets all nodes to maintenance
+    cmds:
+      - for: { var: WORKERS }
+        task: talosctl
+        vars:
+          NODE: "{{ .ITEM }}"
+          ARGS: >
+            reset --reboot=true --graceful=false
+            --system-labels-to-wipe STATE
+            --system-labels-to-wipe EPHEMERAL
+            || true
+      - for: { var: CONTROLPLANES }
+        task: talosctl
+        vars:
+          NODE: "{{ .ITEM }}"
+          ARGS: >
+            reset --reboot=true --graceful=false
+            --system-labels-to-wipe STATE
+            --system-labels-to-wipe EPHEMERAL
+            || true
+      - rm talosconfig kubeconfig
+
+  patch:
+    desc: Applies a patch against all configured nodes
+    vars:
+      PATCH: "{{ .PATCH }}"
+    requires:
+      vars:
+        - PATCH
+    cmds:
+      - for: { var: CONTROLPLANES }
+        task: talosctl
+        vars:
+          NODE: "{{ .NODE }}"
+          ARGS:  patch machineconfig --patch-file {{ .PATCH }}
+      - for: { var: WORKERS }
+        task: talosctl
+        vars:
+          NODE: "{{ .NODE }}"
+          ARGS:  patch machineconfig --patch-file {{ .PATCH }}
+
+  gen-talos:
+    desc: Generates talos configurations
+    deps:
+      - gen-talos-secrets
+      - gen-cilium
+    cmds:
+      - |
+        talosctl gen config \
+          test https://{{ index .CONTROLPLANES "1" }}:6443 \
+          --force \
+          --with-examples=true \
+          --with-docs=true \
+          --with-cluster-discovery=true \
+          --with-kubespan=true \
+          --with-secrets secrets.yaml \
+          --install-image {{ .FACTORYIMAGE }} \
+          --config-patch-control-plane @patches/cni.yaml \
+          --config-patch-control-plane @patches/cilium.yaml \
+          --config-patch @patches/ds.yaml \
+          --config-patch @patches/disk.yaml \
+          --config-patch @patches/time.yaml \
+          --config-patch @patches/kubespan.yaml
+
+  gen-talos-secrets:
+    desc: Generates talos secrets.yaml if missing
+    internal: true
+    status:
+      - test -f secrets.yaml
+    cmd: talosctl gen secrets -o secrets.yaml
+
+  talosctl:
+    desc: Wraps talosctl to run against endpoint and node
+    internal: true
+    vars:
+      NODE: "{{ .NODE }}"
+      ARGS: "{{ .ARGS }}"
+    requires:
+      vars:
+        - NODE
+        - ARGS
+    cmd: talosctl -e {{ .NODE }} -n {{ .NODE }} {{ .ARGS }}
+
+  gen-cilium:
+    desc: Renders cilium manifests to be used during upgrades
+    cmds:
+      - helm repo update cilium
+      - |
+        cat << 'EOF' > ./patches/cilium.yaml
+        # # required when re-applying as a patch
+        # cluster:
+        #   inlineManifests:
+        #     - name: cilium
+        #       $patch: delete
+        # ---
+        EOF
+      - |
+        helm template cilium cilium/cilium \
+          --version {{ .CILIUMVERSION }} \
+          --namespace kube-system \
+          --set=ipam.mode=kubernetes \
+          --set=kubeProxyReplacement=true \
+          --set=securityContext.capabilities.ciliumAgent="{CHOWN,KILL,NET_ADMIN,NET_RAW,IPC_LOCK,SYS_ADMIN,SYS_RESOURCE,DAC_OVERRIDE,FOWNER,SETGID,SETUID}" \
+          --set=securityContext.capabilities.cleanCiliumState="{NET_ADMIN,SYS_ADMIN,SYS_RESOURCE}" \
+          --set=cgroup.autoMount.enabled=false \
+          --set=cgroup.hostRoot=/sys/fs/cgroup \
+          --set=k8sServiceHost=localhost \
+          --set=k8sServicePort=7445 \
+          --set=bpf.masquerade=true \
+          --set=ipv6.enabled=false \
+          --set=enableIPv6Masquerade=false \
+          --set=bpf.hostLegacyRouting=true \
+          --set=bgpControlPlane.enabled=true \
+          --set=defaultLBServiceIPAM=none \
+          --set=bpf.disableExternalIPMitigation=true \
+          --set=bpf.lbExternalClusterIP=true \
+          --set=nodeIPAM.enabled=true \
+          --set=l2announcements.enabled=true \
+          --set=externalIPs.enabled=true \
+          \
+          --set=routingMode=native \
+          --set=ipv4NativeRoutingCIDR={{ .NATIVEROUTINGCIDR }} \
+        | yq -n '.cluster.inlineManifests[0].name="cilium", .cluster.inlineManifests[0].contents=(load_str("/dev/stdin") | sub(" *\n", "\n"))' \
+        >> ./patches/cilium.yaml

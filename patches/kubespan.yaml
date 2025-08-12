@@ -1,0 +1,5 @@
+machine:
+  network:
+    kubespan:
+      enabled: true
+      advertiseKubernetesNetworks: true # required for cilium native routing
