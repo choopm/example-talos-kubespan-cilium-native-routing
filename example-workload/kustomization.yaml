@@ -1,0 +1,12 @@
+resources:
+  - https://raw.githubusercontent.com/siderolabs/example-workload/refs/heads/main/deploy/example-svc-lb.yaml
+
+patches:
+  - target:
+      version: v1
+      kind: Service
+      name: example-workload
+    patch: |
+      - op: add
+        path: /spec/loadBalancerClass
+        value: io.cilium/node

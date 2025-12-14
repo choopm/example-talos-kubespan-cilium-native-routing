@@ -4,7 +4,3 @@ cluster:
       name: none # cilium will be used
   proxy:
     disabled: true # cilium kube-proxy-replacement
-machine:
-  features:
-    hostDNS:
-      forwardKubeDNSToHost: false

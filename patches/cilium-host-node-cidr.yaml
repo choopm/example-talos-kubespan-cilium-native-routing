@@ -1,3 +1,4 @@
+# # required when re-applying as a patch
 # cluster:
 #   inlineManifests:
 #     - name: cilium-host-node-cidr
@@ -7,6 +8,7 @@
 # Widen up the subnet of every cilium_host pod /24 by adding a secondary IP.
 # This will propagate the node pod CIDR into advertiseKubernetesNetworks
 # and therefore make it available in each other kubespans AllowedIPs.
+# It also installs a static route for native-routing-cidr to kubespan.
 # This helps when using the kubespan network for cilium native routing.
 # https://github.com/siderolabs/talos/issues/9043#issuecomment-2419640013
 cluster:
@@ -50,6 +52,12 @@ cluster:
                     sleep "$SLEEP_TIME"
                   }
 
+                  # Add a static route to NATIVE_ROUTING_CIDR via kubespan
+                  ip route add "${NATIVE_ROUTING_CIDR}" dev kubespan || true
+
+                  echo "Configured a static route for ${NATIVE_ROUTING_CIDR} to kubespan"
+                  ip route show dev kubespan
+
                   echo "Watching cilium_host IP addresses..."
 
                   while :; do
@@ -81,6 +89,9 @@ cluster:
                 # The node cidr mask size (IPv4) to allocate pod IPs
                 - name: NODE_CIDR_MASK_SIZE
                   value: "24"
+                # a superset of node cidr to create a static route for kubespan
+                - name: NATIVE_ROUTING_CIDR
+                  value: "10.244.0.0/16"
                 - name: SLEEP_TIME
                   value: "30"
                 securityContext:

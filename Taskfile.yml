@@ -29,7 +29,7 @@ tasks:
       - sleep 5
       - talosctl -n {{ index .CONTROLPLANES "1" }} bootstrap
       - sleep 5
-      - talosctl -n {{ index .CONTROLPLANES "1" }} kubeconfig .
+      - talosctl -n {{ index .CONTROLPLANES "1" }} kubeconfig -f .
 
   apply:
     desc: (re)-applies machineconfigs to all nodes
@@ -74,7 +74,6 @@ tasks:
             --system-labels-to-wipe STATE
             --system-labels-to-wipe EPHEMERAL
             || true
-      - rm talosconfig kubeconfig
 
   patch:
     desc: Applies a patch against all configured nodes
@@ -87,13 +86,13 @@ tasks:
       - for: { var: CONTROLPLANES }
         task: talosctl
         vars:
-          NODE: "{{ .NODE }}"
-          ARGS:  patch machineconfig --patch-file {{ .PATCH }}
+          NODE: "{{ .ITEM }}"
+          ARGS: patch machineconfig --patch-file {{ .PATCH }}
       - for: { var: WORKERS }
         task: talosctl
         vars:
-          NODE: "{{ .NODE }}"
-          ARGS:  patch machineconfig --patch-file {{ .PATCH }}
+          NODE: "{{ .ITEM }}"
+          ARGS: patch machineconfig --patch-file {{ .PATCH }}
 
   gen-talos:
     desc: Generates talos configurations
@@ -113,10 +112,25 @@ tasks:
           --install-image {{ .FACTORYIMAGE }} \
           --config-patch-control-plane @patches/cni.yaml \
           --config-patch-control-plane @patches/cilium.yaml \
-          --config-patch @patches/ds.yaml \
+          --config-patch-control-plane @patches/cilium-host-node-cidr.yaml \
+          --config-patch @patches/kubespan.yaml \
           --config-patch @patches/disk.yaml \
-          --config-patch @patches/time.yaml \
-          --config-patch @patches/kubespan.yaml
+          --config-patch @patches/dns.yaml \
+          --config-patch @patches/time.yaml
+
+  all:
+    desc: "Runs talosctl with arguments against all nodes, example: `task all -- get disks`"
+    cmds:
+      - for: { var: CONTROLPLANES }
+        task: talosctl
+        vars:
+          NODE: "{{ .ITEM }}"
+          ARGS: "{{ .CLI_ARGS }}"
+      - for: { var: WORKERS }
+        task: talosctl
+        vars:
+          NODE: "{{ .ITEM }}"
+          ARGS: "{{ .CLI_ARGS }}"
 
   gen-talos-secrets:
     desc: Generates talos secrets.yaml if missing
@@ -162,13 +176,11 @@ tasks:
           --set=cgroup.hostRoot=/sys/fs/cgroup \
           --set=k8sServiceHost=localhost \
           --set=k8sServicePort=7445 \
-          --set=bpf.masquerade=true \
           --set=ipv6.enabled=false \
           --set=enableIPv6Masquerade=false \
-          --set=bpf.hostLegacyRouting=true \
+          \
           --set=bgpControlPlane.enabled=true \
           --set=defaultLBServiceIPAM=none \
-          --set=bpf.disableExternalIPMitigation=true \
           --set=bpf.lbExternalClusterIP=true \
           --set=nodeIPAM.enabled=true \
           --set=l2announcements.enabled=true \
@@ -176,5 +188,26 @@ tasks:
           \
           --set=routingMode=native \
           --set=ipv4NativeRoutingCIDR={{ .NATIVEROUTINGCIDR }} \
+          --set=bpf.masquerade=true \
+          --set=bpf.hostLegacyRouting=true \
         | yq -n '.cluster.inlineManifests[0].name="cilium", .cluster.inlineManifests[0].contents=(load_str("/dev/stdin") | sub(" *\n", "\n"))' \
         >> ./patches/cilium.yaml
+
+  deploy-example:
+    desc: Deloy example workload
+    cmds:
+      - kubectl apply -k example-workload
+
+  test-example:
+    desc: Test example workload
+    cmds:
+      # try first address of node ipam lb
+      - |
+        NODE_IP=$(kubectl get svc example-workload -o jsonpath='{.status.loadBalancer.ingress[0].ip}'; echo)
+        NODE_PORT=$(kubectl get svc example-workload -o jsonpath='{.spec.ports[0].port}')
+        curl http://$NODE_IP:$NODE_PORT
+      # try third address of node ipam lb, should be working too
+      - |
+        NODE_IP=$(kubectl get svc example-workload -o jsonpath='{.status.loadBalancer.ingress[2].ip}'; echo)
+        NODE_PORT=$(kubectl get svc example-workload -o jsonpath='{.spec.ports[0].port}')
+        curl http://$NODE_IP:$NODE_PORT
