@@ -13,7 +13,7 @@ Note the IP addresses and configure the `CONTROLPLANES` and `WORKERS` variables
 inside the [Taskfile.yml](Taskfile.yml).
 >This test was performed using 4 QEMU/KVM machines
 
-Enusre requirements are installed:
+Ensure requirements are installed:
 - [talosctl](https://docs.siderolabs.com/talos/v1.11/getting-started/talosctl)
 - [task](https://taskfile.dev/)
 - [helm](https://helm.sh/)
@@ -41,10 +41,11 @@ Check the available tasks using `task --list` for more info.
 
 When using the DaemonSet approach to add the node's pod CIDR to the cilium_host
 interface, most things will work, but you will encounter issues when trying to
-use some cilium features such as Node-IPAM-LB or Egress-Gateway.
+use some cilium features such as Node-IPAM-LB. Probably everything relying on
+service load-balancing when communicating with external nodes is affected.
 
 The underlying cause is that few packets sent by cilium from it's cilium_host
-interface might end up skipping the KubeSpan interception and end up being
+interface might skip the KubeSpan interception and end up being
 natively-routed to the host network. This is undesired and needs to be fixed.
 
 There are different solutions to this:
@@ -64,6 +65,12 @@ Untested/unrecommended/potential solutions:
   the kubespan tunnels are not available. For now do not consider trying this.
   Would be done using something like `extraArgs=--host-device=kubespan`
 - Advertise the node's pod CIDR through BGP to other nodes, tricky and extra work
+
+## TODO
+
+- It still needs to be verified that communication with nodes in foreign L3
+  subnets is working. I don't expect this to fail when using the static route
+  patch - but still - it remains unclear until it was tested.
 
 ## Notes and credits
 

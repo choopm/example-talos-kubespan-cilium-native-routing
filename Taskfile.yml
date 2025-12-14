@@ -194,7 +194,7 @@ tasks:
         >> ./patches/cilium.yaml
 
   deploy-example:
-    desc: Deloy example workload
+    desc: Deploy example workload
     cmds:
       - kubectl apply -k example-workload
 
