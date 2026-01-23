@@ -1,5 +1,11 @@
 # Talos KubeSpan + cilium Native-Routing
 
+> *This repo got archived as of Talos 1.13+ native support is available*
+> - https://github.com/siderolabs/talos/issues/9043#issuecomment-3786740573
+> - https://docs.siderolabs.com/talos/v1.13/networking/kubespan#configuration
+
+---
+
 This serves as a demo and documentation when utilizing Talos
 [KubeSpan](https://docs.siderolabs.com/talos/v1.11/networking/kubespan#kubespan)
 for [Native-Routing](https://docs.cilium.io/en/v1.18/network/concepts/routing/#arch-direct-routing)
@@ -11,7 +17,10 @@ working demo cluster. You are required to provide IP addresses via `vars`.
 Get started by booting your Talos nodes and ensure these are in maintenance mode.
 Note the IP addresses and configure the `CONTROLPLANES` and `WORKERS` variables
 inside the [Taskfile.yml](Taskfile.yml).
->This test was performed using 4 QEMU/KVM machines
+
+>This test was performed using 5 QEMU/KVM machines across two network segments.
+>All nodes (2vCPU 4GB 25GB) were booted with the latest available ISO.
+>One node was placed in a separate bridge and subnet with routing supported.
 
 Ensure requirements are installed:
 - [talosctl](https://docs.siderolabs.com/talos/v1.11/getting-started/talosctl)
@@ -65,12 +74,6 @@ Untested/unrecommended/potential solutions:
   the kubespan tunnels are not available. For now do not consider trying this.
   Would be done using something like `extraArgs=--host-device=kubespan`
 - Advertise the node's pod CIDR through BGP to other nodes, tricky and extra work
-
-## TODO
-
-- It still needs to be verified that communication with nodes in foreign L3
-  subnets is working. I don't expect this to fail when using the static route
-  patch - but still - it remains unclear until it was tested.
 
 ## Notes and credits
 
